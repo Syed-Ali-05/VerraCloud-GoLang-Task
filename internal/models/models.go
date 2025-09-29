@@ -14,6 +14,7 @@ const (
     AdminPass  = "Passw0rd!"
 )
 
+// User is an application account. Email is unique; password is bcrypt-hashed.
 type User struct {
     ID           uint   `gorm:"primaryKey"`
     Email        string `gorm:"uniqueIndex;size:255;not null"`
@@ -21,6 +22,7 @@ type User struct {
     CreatedAt    int64  `gorm:"autoCreateTime"`
 }
 
+// Item is a row owned by a User. Indexed by user_id for quick listing.
 type Item struct {
     ID        uint   `gorm:"primaryKey"`
     UserID    uint   `gorm:"index;not null"`
@@ -28,6 +30,7 @@ type Item struct {
     CreatedAt int64  `gorm:"autoCreateTime"`
 }
 
+// InitDB opens SQLite, runs AutoMigrate, and seeds the admin user if missing.
 func InitDB() *gorm.DB {
     dbPath := strings.TrimSpace(os.Getenv("DB_PATH"))
     if dbPath == "" {

@@ -12,6 +12,7 @@ import (
 //go:embed templates/*.templ
 var tmplFS embed.FS
 
+// mustParseSet parses the given template files with shared helper functions.
 func mustParseSet(files ...string) *template.Template {
 	t := template.New("").Funcs(template.FuncMap{
 		"add": func(a, b int) int { return a + b },
@@ -45,6 +46,7 @@ var (
 	tmplItemsPartial     = mustParseSet("templates/items.templ")
 )
 
+// mustParseSet parses the given template files with shared helper functions.
 func renderLoginPartial(w http.ResponseWriter, email, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmplLoginPartial.ExecuteTemplate(w, "login.templ", map[string]any{

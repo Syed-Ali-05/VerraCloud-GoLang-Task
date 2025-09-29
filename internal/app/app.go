@@ -1,3 +1,4 @@
+// Package app contains HTTP server wiring: routes, handlers, and template rendering.
 package app
 
 import (
@@ -13,6 +14,7 @@ import (
 
 )
 
+// App holds shared dependencies for HTTP handlers.
 type App struct {
     DB *gorm.DB
 }

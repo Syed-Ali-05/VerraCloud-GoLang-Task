@@ -12,6 +12,7 @@ import (
 
 )
 
+// session represents a simple in-memory session with an expiry.
 type session struct {
 	UserID uint
 	Exp    time.Time
@@ -24,6 +25,7 @@ const (
 	sessionTTL = 24 * time.Hour
 )
 
+// issueSession creates a session token, stores it in memory, and sets a cookie.
 func issueSession(w http.ResponseWriter, userID uint) {
 	tok := utils.RandomToken(32) // ← use utils.RandomToken
 	sessions[tok] = session{UserID: userID, Exp: time.Now().Add(sessionTTL)}
@@ -55,6 +57,7 @@ func clearSession(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// currentUser resolves the logged-in user from the session cookie; returns nil if missing/expired.
 func (a *App) currentUser(r *http.Request) *models.User {
 	c, err := r.Cookie(cookieName)
 	if err != nil {

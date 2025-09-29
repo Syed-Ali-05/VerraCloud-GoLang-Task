@@ -12,7 +12,7 @@ import (
 "github.com/Syed-Ali-05/VerraCloud-GoLang-Task/internal/models"
 )
 
-// GET /
+// handleRoot serves either the login page or the dashboard depending on session. //GET
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -34,7 +34,7 @@ func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// POST /login
+// handleRoot serves either the login page or the dashboard depending on session. //POST
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
@@ -65,7 +65,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// POST /logout
+// handleLogout destroys the session and returns the login partial for inline swap. //POST
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
@@ -76,7 +76,8 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	renderLoginPartial(w, "", "")
 }
 
-// GET/POST /items
+// handleItems lists and creates items (HTMX). GET returns the table partial,
+// POST validates, persists, then returns the refreshed table partial.
 func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	if user == nil {

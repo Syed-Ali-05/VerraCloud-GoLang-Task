@@ -5,6 +5,7 @@ import (
 	"net/http"
 )
 
+// RandomToken returns a URL-safe random token of n bytes.
 func RandomToken(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -17,6 +18,7 @@ func RandomToken(n int) string {
 	return string(b)
 }
 
+// SecurityHeaders adds a minimal set of security-related headers to all responses.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
