@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+    log "github.com/sirupsen/logrus"
 
 	"strconv"
 
@@ -23,7 +23,7 @@ import (
 
 // ───────────────────────── Templates ─────────────────────────
 
-//go:embed templates/*.html
+//go:embed templates/*.templ
 var tmplFS embed.FS
 
 func mustParseSet(files ...string) *template.Template {
@@ -39,18 +39,17 @@ func mustParseSet(files ...string) *template.Template {
 }
 
 
-// Full-page sets (base + specific content)
 var (
-	tmplBaseLogin     = mustParseSet("templates/base.html", "templates/login.html")
-	tmplBaseDashboard = mustParseSet("templates/base.html", "templates/dashboard.html", "templates/items.html")
+    tmplBaseLogin     = mustParseSet("templates/base.templ", "templates/login.templ")
+    tmplBaseDashboard = mustParseSet("templates/base.templ", "templates/dashboard.templ", "templates/items.templ")
 )
 
-// Partials (fragments returned to HTMX)
 var (
-	tmplLoginPartial     = mustParseSet("templates/login.html")
-	tmplDashboardPartial = mustParseSet("templates/dashboard.html")
-	tmplItemsPartial     = mustParseSet("templates/items.html")
+    tmplLoginPartial     = mustParseSet("templates/login.templ")
+    tmplDashboardPartial = mustParseSet("templates/dashboard.templ")
+    tmplItemsPartial     = mustParseSet("templates/items.templ")
 )
+
 
 // ───────────────────────── Models ─────────────────────────
 
@@ -92,20 +91,29 @@ type App struct {
 }
 
 func main() {
+
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+	log.SetLevel(log.InfoLevel)
+
 	// DB path (override with DB_PATH env)
 	dbPath := strings.TrimSpace(os.Getenv("DB_PATH"))
 	if dbPath == "" {
 		dbPath = "app.db"
 	}
 
-	// ⬇️ یہی وہ لائن ہے جس کی آپ بات کر رہے تھے — یہ main.go میں func main() کے اندر ہے
+	log.Infof("Starting server...")
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
 	if err := db.AutoMigrate(&User{}, &Item{}); err != nil {
-		log.Fatalf("migrate: %v", err)
+		log.Fatalf("Database migration failed: %v", err)
 	}
+	log.Infof("Database connected: %s", dbPath)
+
+	
 
 	// Seed admin user (bcrypt)
 	var count int64
@@ -115,8 +123,8 @@ func main() {
 		if err := db.Create(&User{Email: adminEmail, PasswordHash: string(hash)}).Error; err != nil {
 			log.Fatalf("seed user: %v", err)
 		}
-		log.Printf("Seeded admin user %s / %s", adminEmail, adminPass)
-	}
+		log.Infof("Seeded admin user %s / %s", adminEmail, adminPass)
+			}
 
 	app := &App{DB: db}
 
@@ -131,7 +139,7 @@ func main() {
 	mux.HandleFunc("/items", app.handleItems)
 
 	addr := ":8080"
-	log.Printf("Listening on %s", addr)
+	log.Infof("Listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, securityHeaders(mux)))
 }
 
@@ -161,6 +169,7 @@ func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 // POST /login
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
@@ -171,19 +180,22 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	var u User
 	if err := a.DB.First(&u, "email = ?", email).Error; err != nil {
-		// no 401 here, just re-render the form with error
+		log.WithField("email", email).Warn("Login failed: user not found")
 		renderLoginPartial(w, email, "Invalid email or password.")
 		return
 	}
+	
 
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
-		// wrong password → show inline error
+		log.WithField("email", email).Warn("Login failed: wrong password")
 		renderLoginPartial(w, email, "Invalid email or password.")
 		return
 	}
 
 	// success → issue cookie + show dashboard
 	issueSession(w, u.ID)
+	log.WithFields(log.Fields{"email": u.Email, "user_id": u.ID}).Info("Login success")
+
 	if err := tmplDashboardPartial.ExecuteTemplate(w, "dashboard.html", map[string]any{"User": &u}); err != nil {
 		httpErrorFragment(w, err)
 	}
@@ -196,6 +208,7 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	log.WithField("user", a.currentUser(r)).Info("User logging out")
 	clearSession(w, r)
 	renderLoginPartial(w, "", "")
 }
@@ -248,6 +261,7 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	if user == nil {
+		log.Warn("Unauthorized /items access")
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
 		return
@@ -266,6 +280,13 @@ func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 		q = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
 
+	log.WithFields(log.Fields{
+		"user_id": user.ID,
+		"method":  r.Method,
+		"q":       q,
+		"page":    page,
+	}).Info("/items request")
+
 	switch r.Method {
 	case http.MethodGet:
 		// just render list
@@ -282,6 +303,10 @@ func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 			httpErrorFragment(w, err)
 			return
 		}
+		log.WithFields(log.Fields{
+			"user_id": user.ID,
+			"name":    name,
+		}).Info("Adding new item")
 		// reset to first page after adding
 		page = 1
 	default:
@@ -333,11 +358,12 @@ func renderLoginPartial(w http.ResponseWriter, email, errMsg string) {
 }
 
 func httpErrorFragment(w http.ResponseWriter, err error) {
-	log.Printf("error: %v", err)
+	log.Errorf("error: %v", err) // logrus error-level logging
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, `<div class="error">Something went wrong. Please try again.</div>`)
 }
+
 
 func issueSession(w http.ResponseWriter, userID uint) {
 	tok := randomToken(32)
@@ -370,21 +396,52 @@ func clearSession(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// func (a *App) currentUser(r *http.Request) *User {
+// 	c, err := r.Cookie(cookieName)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	s, ok := sessions[c.Value]
+// 	if !ok || time.Now().After(s.Exp) {
+// 		return nil
+// 	}
+// 	var u User
+// 	if err := a.DB.First(&u, s.UserID).Error; err != nil {
+// 		return nil
+// 	}
+// 	return &u
+// }
+
 func (a *App) currentUser(r *http.Request) *User {
 	c, err := r.Cookie(cookieName)
 	if err != nil {
+		log.Debug("No session cookie found")
 		return nil
 	}
 	s, ok := sessions[c.Value]
-	if !ok || time.Now().After(s.Exp) {
+	if !ok {
+		log.Debug("Invalid session token")
 		return nil
 	}
+	if time.Now().After(s.Exp) {
+		log.Debug("Session expired")
+		return nil
+	}
+
 	var u User
 	if err := a.DB.First(&u, s.UserID).Error; err != nil {
+		log.WithError(err).Warnf("Failed to load user for session %s", c.Value)
 		return nil
 	}
+
+	log.WithFields(log.Fields{
+		"user_id": u.ID,
+		"email":   u.Email,
+	}).Debug("Resolved current user from session")
+
 	return &u
 }
+
 
 func randomToken(n int) string {
 	b := make([]byte, n)
