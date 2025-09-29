@@ -1,8 +1,7 @@
-# Go + HTMX Auth Inline Demo
+# VerraCloud - Go + HTMX Auth Inline Task
 
 ### Run
 ```bash
-go mod init go-htmx-auth-inline-clean // to initialize
 go mod tidy
 go run ./cmd/server
 ```
