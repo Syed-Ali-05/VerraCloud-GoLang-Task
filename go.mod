@@ -1,4 +1,4 @@
-module example.com/go-htmx-auth-inline
+module github.com/Syed-Ali-05/VerraCloud-GoLang-Task
 
 go 1.21
 

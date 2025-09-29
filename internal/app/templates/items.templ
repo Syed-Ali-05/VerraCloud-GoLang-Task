@@ -1,4 +1,4 @@
-{{define "items.html"}}
+{{define "items.templ"}}
 <div id="item-results">
   {{if .Items}}
   <table role="grid" id="items-table">
@@ -14,7 +14,7 @@
       <tr>
         <td>{{.ID}}</td>
         <td>{{.Name}}</td>
-        <td><small>{{.CreatedAt.Format "2006-01-02 15:04"}}</small></td>
+        <td><small>{{formatTime .CreatedAt}}</small></td>
       </tr>
       {{end}}
     </tbody>
