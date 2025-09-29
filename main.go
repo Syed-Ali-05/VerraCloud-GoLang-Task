@@ -1,0 +1,334 @@
+package main
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"embed"
+	"errors"
+	"fmt"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"gorm.io/gorm"
+	"github.com/glebarez/sqlite" // PURE-GO SQLite driver (no CGO)
+)
+
+// ───────────────────────── Templates ─────────────────────────
+
+//go:embed templates/*.html
+var tmplFS embed.FS
+
+func mustParseSet(files ...string) *template.Template {
+	t := template.New("").Funcs(template.FuncMap{})
+	tt, err := t.ParseFS(tmplFS, files...)
+	if err != nil {
+		log.Fatalf("template parse: %v", err)
+	}
+	return tt
+}
+
+// Full-page sets (base + specific content)
+var (
+	tmplBaseLogin     = mustParseSet("templates/base.html", "templates/login.html")
+	tmplBaseDashboard = mustParseSet("templates/base.html", "templates/dashboard.html", "templates/items.html")
+)
+
+// Partials (fragments returned to HTMX)
+var (
+	tmplLoginPartial     = mustParseSet("templates/login.html")
+	tmplDashboardPartial = mustParseSet("templates/dashboard.html")
+	tmplItemsPartial     = mustParseSet("templates/items.html")
+)
+
+// ───────────────────────── Models ─────────────────────────
+
+type User struct {
+	ID           uint      `gorm:"primaryKey"`
+	Email        string    `gorm:"uniqueIndex;size:255;not null"`
+	PasswordHash string    `gorm:"not null"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+}
+
+type Item struct {
+	ID        uint      `gorm:"primaryKey"`
+	UserID    uint      `gorm:"index;not null"`
+	Name      string    `gorm:"size:255;not null"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+}
+
+// ───────────────────────── Sessions ─────────────────────────
+
+type session struct {
+	UserID uint
+	Exp    time.Time
+}
+
+var sessions = map[string]session{}
+
+const (
+	cookieName = "sid"
+	sessionTTL = 24 * time.Hour
+
+	adminEmail = "admin@example.com"
+	adminPass  = "Passw0rd!"
+)
+
+// ───────────────────────── App ─────────────────────────
+
+type App struct {
+	DB *gorm.DB
+}
+
+func main() {
+	// DB path (override with DB_PATH env)
+	dbPath := strings.TrimSpace(os.Getenv("DB_PATH"))
+	if dbPath == "" {
+		dbPath = "app.db"
+	}
+
+	// ⬇️ یہی وہ لائن ہے جس کی آپ بات کر رہے تھے — یہ main.go میں func main() کے اندر ہے
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&User{}, &Item{}); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+
+	// Seed admin user (bcrypt)
+	var count int64
+	db.Model(&User{}).Where("email = ?", adminEmail).Count(&count)
+	if count == 0 {
+		hash, _ := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+		if err := db.Create(&User{Email: adminEmail, PasswordHash: string(hash)}).Error; err != nil {
+			log.Fatalf("seed user: %v", err)
+		}
+		log.Printf("Seeded admin user %s / %s", adminEmail, adminPass)
+	}
+
+	app := &App{DB: db}
+
+	mux := http.NewServeMux()
+	// Static (optional)
+	mux.Handle("/public/", http.StripPrefix("/public/", http.FileServer(http.Dir("public"))))
+
+	// Routes
+	mux.HandleFunc("/", app.handleRoot) // GET
+	mux.HandleFunc("/login", app.handleLogin)
+	mux.HandleFunc("/logout", app.handleLogout)
+	mux.HandleFunc("/items", app.handleItems)
+
+	addr := ":8080"
+	log.Printf("Listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, securityHeaders(mux)))
+}
+
+// ───────────────────────── Handlers ─────────────────────────
+
+// GET /
+func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
+	user := a.currentUser(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if user == nil {
+		if err := tmplBaseLogin.ExecuteTemplate(w, "base.html", map[string]any{
+			"Email": "",
+			"Error": "",
+		}); err != nil {
+			httpErrorFragment(w, err)
+		}
+		return
+	}
+
+	if err := tmplBaseDashboard.ExecuteTemplate(w, "base.html", map[string]any{
+		"User": user,
+	}); err != nil {
+		httpErrorFragment(w, err)
+	}
+}
+
+// POST /login
+func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+
+	email := strings.TrimSpace(r.FormValue("email"))
+	password := r.FormValue("password")
+
+	var u User
+	if err := a.DB.First(&u, "email = ?", email).Error; err != nil {
+		// no 401 here, just re-render the form with error
+		renderLoginPartial(w, email, "Invalid email or password.")
+		return
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		// wrong password → show inline error
+		renderLoginPartial(w, email, "Invalid email or password.")
+		return
+	}
+
+	// success → issue cookie + show dashboard
+	issueSession(w, u.ID)
+	if err := tmplDashboardPartial.ExecuteTemplate(w, "dashboard.html", map[string]any{"User": &u}); err != nil {
+		httpErrorFragment(w, err)
+	}
+}
+
+
+// POST /logout
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	clearSession(w, r)
+	renderLoginPartial(w, "", "")
+}
+
+// GET/POST /items
+func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
+	user := a.currentUser(r)
+	if user == nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
+		// w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		var items []Item
+		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
+			httpErrorFragment(w, err)
+			return
+		}
+		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
+			httpErrorFragment(w, err)
+		}
+	case http.MethodPost:
+		name := strings.TrimSpace(r.FormValue("name"))
+		if name == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `<div id="item-list"><div class="error">Name is required.</div></div>`)
+			return
+		}
+		it := Item{UserID: user.ID, Name: name}
+		if err := a.DB.Create(&it).Error; err != nil {
+			httpErrorFragment(w, err)
+			return
+		}
+		var items []Item
+		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
+			httpErrorFragment(w, err)
+			return
+		}
+		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
+			httpErrorFragment(w, err)
+		}
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// ───────────────────────── Helpers ─────────────────────────
+
+func renderLoginPartial(w http.ResponseWriter, email, errMsg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmplLoginPartial.ExecuteTemplate(w, "login.html", map[string]any{
+		"Email": email,
+		"Error": errMsg,
+	}); err != nil {
+		httpErrorFragment(w, err)
+	}
+}
+
+func httpErrorFragment(w http.ResponseWriter, err error) {
+	log.Printf("error: %v", err)
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, `<div class="error">Something went wrong. Please try again.</div>`)
+}
+
+func issueSession(w http.ResponseWriter, userID uint) {
+	tok := randomToken(32)
+	sessions[tok] = session{UserID: userID, Exp: time.Now().Add(sessionTTL)}
+	c := &http.Cookie{
+		Name:     cookieName,
+		Value:    tok,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	if isTLS() {
+		c.Secure = true
+	}
+	http.SetCookie(w, c)
+}
+
+func clearSession(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(cookieName); err == nil {
+		delete(sessions, c.Value)
+		c.Value = ""
+		c.Path = "/"
+		c.MaxAge = -1
+		c.HttpOnly = true
+		c.SameSite = http.SameSiteLaxMode
+		if isTLS() {
+			c.Secure = true
+		}
+		http.SetCookie(w, c)
+	}
+}
+
+func (a *App) currentUser(r *http.Request) *User {
+	c, err := r.Cookie(cookieName)
+	if err != nil {
+		return nil
+	}
+	s, ok := sessions[c.Value]
+	if !ok || time.Now().After(s.Exp) {
+		return nil
+	}
+	var u User
+	if err := a.DB.First(&u, s.UserID).Error; err != nil {
+		return nil
+	}
+	return &u
+}
+
+func randomToken(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	const alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for i := range b {
+		b[i] = alpha[int(b[i])%len(alpha)]
+	}
+	return string(b)
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isTLS() bool { return os.Getenv("TLS") == "1" }
+
+// Ensure database/sql is linked
+var _ = sql.ErrNoRows
+var _ = errors.New

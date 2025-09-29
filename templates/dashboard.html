@@ -1,35 +1,28 @@
+{{define "content"}}
+<header style="display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+  <h2>Dashboard</h2>
+  <form hx-post="/logout" hx-target="#app" hx-swap="innerHTML">
+    <button type="submit" class="secondary">Logout</button>
+  </form>
+</header>
 
+<section>
+  <h3>Add Item</h3>
+  <form hx-post="/items" hx-target="#item-list" hx-swap="outerHTML">
+    <label>Item name
+      <input type="text" name="name" placeholder="e.g. Learn HTMX" required />
+    </label>
+    <button type="submit">Add</button>
+  </form>
+</section>
 
-{{define "dashboard"}}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Dashboard - My App</title>
-  <link rel="stylesheet" href="https://unpkg.com/picocss@1.5.6/dist/pico.min.css">
-  <script src="https://unpkg.com/htmx.org@1.11.0"></script>
-</head>
-<body>
-  <main id="app" class="container">
-    <header class="grid">
-      <h2>Welcome, {{.Email}}</h2>
-      <form hx-post="/logout" hx-target="#app" hx-swap="innerHTML" style="justify-self:end;">
-        <button type="submit">Logout</button>
-      </form>
-    </header>
-
-    <section>
-      <form class="grid" hx-post="/items" hx-target="#items" hx-swap="innerHTML" style="grid-template-columns:1fr auto;gap:.5rem;">
-        <input type="text" name="name" placeholder="New item" required>
-        <button type="submit">Add</button>
-      </form>
-    </section>
-
-    <section id="items" hx-get="/items" hx-trigger="load" hx-swap="innerHTML">
-      <em>Loading items…</em>
-    </section>
-  </main>
-</body>
-</html>
+<section>
+  <h3>Your Items</h3>
+  <!-- Lazy-load the list to demonstrate hx-get pattern -->
+  <div id="item-list" hx-get="/items" hx-trigger="load" hx-swap="outerHTML">
+    <p class="muted">Loading…</p>
+  </div>
+</section>
 {{end}}
+
+{{define "dashboard.html"}}{{template "content" .}}{{end}}

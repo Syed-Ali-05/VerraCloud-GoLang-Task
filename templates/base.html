@@ -1,18 +1,22 @@
-
-
-{{define "base"}}
+{{define "base.html"}}
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <title>{{block "title" .}}My App{{end}}</title>
-  <link rel="stylesheet" href="https://unpkg.com/picocss@1.5.6/dist/pico.min.css">
-  <script src="https://unpkg.com/htmx.org@1.11.0"></script>
-</head>
-<body>
-  <main class="container">
-    {{block "content" .}}{{end}}
-  </main>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go + HTMX Demo</title>
+    <!-- Use PicoCSS (or swap for Tailwind CDN if preferred) -->
+    <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@1.5.10/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  </head>
+  <body>
+    <main class="container" id="app">
+      {{block "content" .}}{{end}}
+    </main>
+    <footer class="container" style="margin-top:2rem;font-size:0.9em;color:#666;">
+      <hr/>
+      <p>Sample app for Developer Test — Go + HTMX</p>
+    </footer>
+  </body>
 </html>
 {{end}}

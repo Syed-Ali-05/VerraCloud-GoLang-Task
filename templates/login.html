@@ -1,21 +1,20 @@
-{{define "login"}}
-{{template "base" .}}
-
-{{block "content" .}}
-<h2>Login</h2>
-
-{{if .Error}}
-  <p style="color:red">{{.Error}}</p>
+{{define "content"}}
+<article>
+  <h2>Sign in</h2>
+  {{if .Error}}
+    <div class="error" role="alert">{{.Error}}</div>
+  {{end}}
+  <form hx-post="/login" hx-target="#app" hx-swap="innerHTML">
+    <label>Email
+      <input type="email" name="email" value="{{.Email}}" required />
+    </label>
+    <label>Password
+      <input type="password" name="password" required />
+    </label>
+    <button type="submit">Login</button>
+  </form>
+  <!-- <p class="muted">Demo credentials: <code>admin@example.com</code> / <code>Passw0rd!</code></p> -->
+</article>
 {{end}}
 
-<form method="POST" action="/login">
-  <label>Email:</label>
-  <input type="email" name="email" value="{{.Email}}" required>
-  <br>
-  <label>Password:</label>
-  <input type="password" name="password" required>
-  <br>
-  <button type="submit">Login</button>
-</form>
-{{end}}
-{{end}}
+{{define "login.html"}}{{template "content" .}}{{end}}
