@@ -8,8 +8,10 @@
 
 <section>
   <h3>Add Item</h3>
-  <!-- <form hx-post="/items" hx-target="#item-list" hx-swap="outerHTML"> -->
-    <form hx-post="/items" hx-target="#item-list" hx-swap="outerHTML">
+  <form 
+      hx-post="/items" 
+      hx-target="#item-results" 
+      hx-swap="outerHTML">
     <label>Item name
       <input type="text" name="name" placeholder="e.g. Learn HTMX" required />
     </label>
@@ -19,8 +21,17 @@
 
 <section>
   <h3>Your Items</h3>
-  <!-- Lazy-load the list to demonstrate hx-get pattern -->
-  <div id="item-list" hx-get="/items" hx-trigger="load" hx-swap="outerHTML">
+  <!-- Search bar always visible -->
+  <form 
+      hx-get="/items" 
+      hx-target="#item-results" 
+      hx-swap="outerHTML"
+      hx-trigger="keyup changed delay:400ms from:input[name='q']"
+      style="margin-bottom:1rem; display:flex; gap:.5rem; width:100%;">
+    <input type="text" name="q" placeholder="Search..." value="{{.Q}}" style="flex:1;">
+  </form>
+
+  <div id="item-results" hx-get="/items" hx-trigger="load" hx-swap="outerHTML">
     <p class="muted">Loading…</p>
   </div>
 </section>

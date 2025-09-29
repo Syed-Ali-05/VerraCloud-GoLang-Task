@@ -1,26 +1,18 @@
 {{define "items.html"}}
-<div id="item-list">
-  <!-- Search form -->
-  <form hx-get="/items"
-        hx-target="#item-list"
-        hx-swap="outerHTML"
-        style="margin-bottom:1rem; display:flex; gap:.5rem;">
-    <input type="text" name="q" placeholder="Search..." value="{{.Q}}">
-    <button type="submit">Search</button>
-  </form>
-
-  <!-- Items table -->
+<div id="item-results">
   {{if .Items}}
-  <table role="grid">
+  <table role="grid" id="items-table">
     <thead>
       <tr>
-        <th style="width:60%">Name</th>
+        <th style="width:10%">ID</th>
+        <th style="width:50%">Name</th>
         <th style="width:40%">Created</th>
       </tr>
     </thead>
     <tbody>
       {{range .Items}}
       <tr>
+        <td>{{.ID}}</td>
         <td>{{.Name}}</td>
         <td><small>{{.CreatedAt.Format "2006-01-02 15:04"}}</small></td>
       </tr>
@@ -31,20 +23,21 @@
     <p class="muted">No items found.</p>
   {{end}}
 
-  <!-- Pagination -->
-  <nav style="margin-top:1rem; display:flex; gap:.5rem;">
+  <nav style="margin-top:1rem; display:flex; gap:.5rem; align-items:center;">
     {{if gt .Page 1}}
-    <button hx-get="/items?page={{sub .Page 1}}{{if .Q}}&q={{.Q}}{{end}}"
-            hx-target="#item-list"
-            hx-swap="outerHTML">Previous</button>
+    <button
+      hx-get="/items?page={{sub .Page 1}}{{if .Q}}&q={{.Q}}{{end}}"
+      hx-target="#item-results"
+      hx-swap="outerHTML">Previous</button>
     {{end}}
 
     <span>Page {{.Page}} of {{.TotalPages}}</span>
 
     {{if lt .Page .TotalPages}}
-    <button hx-get="/items?page={{add .Page 1}}{{if .Q}}&q={{.Q}}{{end}}"
-            hx-target="#item-list"
-            hx-swap="outerHTML">Next</button>
+    <button
+      hx-get="/items?page={{add .Page 1}}{{if .Q}}&q={{.Q}}{{end}}"
+      hx-target="#item-results"
+      hx-swap="outerHTML">Next</button>
     {{end}}
   </nav>
 </div>
