@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"strconv"
+
 	"golang.org/x/crypto/bcrypt"
 
 	"gorm.io/gorm"
@@ -25,13 +27,17 @@ import (
 var tmplFS embed.FS
 
 func mustParseSet(files ...string) *template.Template {
-	t := template.New("").Funcs(template.FuncMap{})
+	t := template.New("").Funcs(template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+		"sub": func(a, b int) int { return a - b },
+	})
 	tt, err := t.ParseFS(tmplFS, files...)
 	if err != nil {
 		log.Fatalf("template parse: %v", err)
 	}
 	return tt
 }
+
 
 // Full-page sets (base + specific content)
 var (
@@ -195,27 +201,76 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET/POST /items
+// func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
+// 	user := a.currentUser(r)
+// 	if user == nil {
+// 		w.WriteHeader(http.StatusUnauthorized)
+// 		fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
+// 		// w.Header().Set("Content-Type", "text/html; charset=utf-8")
+// 		// fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
+// 		return
+// 	}
+
+// 	switch r.Method {
+// 	case http.MethodGet:
+// 		var items []Item
+// 		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
+// 			httpErrorFragment(w, err)
+// 			return
+// 		}
+// 		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
+// 			httpErrorFragment(w, err)
+// 		}
+// 	case http.MethodPost:
+// 		name := strings.TrimSpace(r.FormValue("name"))
+// 		if name == "" {
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			fmt.Fprint(w, `<div id="item-list"><div class="error">Name is required.</div></div>`)
+// 			return
+// 		}
+// 		it := Item{UserID: user.ID, Name: name}
+// 		if err := a.DB.Create(&it).Error; err != nil {
+// 			httpErrorFragment(w, err)
+// 			return
+// 		}
+// 		var items []Item
+// 		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
+// 			httpErrorFragment(w, err)
+// 			return
+// 		}
+// 		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
+// 			httpErrorFragment(w, err)
+// 		}
+// 	default:
+// 		http.NotFound(w, r)
+// 	}
+// }
 func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	if user == nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
-		// w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// fmt.Fprint(w, `<div class="notice">Unauthorized. Please log in.</div>`)
 		return
+	}
+
+	const pageSize = 5
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
+	}
+	// also check form values for POST
+	q := strings.TrimSpace(r.FormValue("q"))
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		var items []Item
-		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
-			httpErrorFragment(w, err)
-			return
-		}
-		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
-			httpErrorFragment(w, err)
-		}
+		// just render list
 	case http.MethodPost:
+		// handle add new item
 		name := strings.TrimSpace(r.FormValue("name"))
 		if name == "" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -227,18 +282,43 @@ func (a *App) handleItems(w http.ResponseWriter, r *http.Request) {
 			httpErrorFragment(w, err)
 			return
 		}
-		var items []Item
-		if err := a.DB.Order("created_at DESC").Where("user_id = ?", user.ID).Find(&items).Error; err != nil {
-			httpErrorFragment(w, err)
-			return
-		}
-		if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{"Items": items}); err != nil {
-			httpErrorFragment(w, err)
-		}
+		// reset to first page after adding
+		page = 1
 	default:
 		http.NotFound(w, r)
+		return
+	}
+
+	// Common query logic for GET and POST
+	var items []Item
+	query := a.DB.Where("user_id = ?", user.ID)
+	if q != "" {
+		query = query.Where("name LIKE ?", "%"+q+"%")
+	}
+
+	var total int64
+	query.Model(&Item{}).Count(&total)
+
+	if err := query.Order("created_at DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&items).Error; err != nil {
+		httpErrorFragment(w, err)
+		return
+	}
+
+	totalPages := int((total + pageSize - 1) / pageSize)
+	if err := tmplItemsPartial.ExecuteTemplate(w, "items.html", map[string]any{
+		"Items":      items,
+		"Page":       page,
+		"TotalPages": totalPages,
+		"Q":          q,
+	}); err != nil {
+		httpErrorFragment(w, err)
 	}
 }
+
+
 
 // ───────────────────────── Helpers ─────────────────────────
 
