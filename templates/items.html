@@ -1,0 +1,13 @@
+
+
+{{define "items"}}
+<div>
+  <ul>
+    {{range .}}
+      <li>{{.Name}} <small>({{.CreatedAt.Format "2006-01-02 15:04"}})</small></li>
+    {{else}}
+      <li>No items yet</li>
+    {{end}}
+  </ul>
+</div>
+{{end}}

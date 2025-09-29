@@ -1,0 +1,35 @@
+
+
+{{define "dashboard"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard - My App</title>
+  <link rel="stylesheet" href="https://unpkg.com/picocss@1.5.6/dist/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@1.11.0"></script>
+</head>
+<body>
+  <main id="app" class="container">
+    <header class="grid">
+      <h2>Welcome, {{.Email}}</h2>
+      <form hx-post="/logout" hx-target="#app" hx-swap="innerHTML" style="justify-self:end;">
+        <button type="submit">Logout</button>
+      </form>
+    </header>
+
+    <section>
+      <form class="grid" hx-post="/items" hx-target="#items" hx-swap="innerHTML" style="grid-template-columns:1fr auto;gap:.5rem;">
+        <input type="text" name="name" placeholder="New item" required>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section id="items" hx-get="/items" hx-trigger="load" hx-swap="innerHTML">
+      <em>Loading items…</em>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}
